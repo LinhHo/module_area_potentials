@@ -1,0 +1,109 @@
+# Configuration for running module_area_potentials on a multi-country shape file.
+# Structure mirrors tests/integration/test_config.yaml; see
+# config/README.md and workflow/internal/config.schema.yaml for the full set
+# of options.
+
+# Per-country land buffer distances (meters) consumed by
+# `build_shape_tiles.py --pre-buffer-maritime`. These are baked into the
+# maritime geometry at tile build time and NOT read by the module at runtime.
+# Keep `shapes_buffer.land: 0` for wind_offshore below so the runtime does
+# not add the same buffer a second time.
+buffer_maritime:
+  default: 10000  # 10 km from the coast
+  overrides:
+    PRT: 2000
+    NLD: 22000    # 22 km = 12 nautical miles
+
+module_area_potentials:
+  tiny_files: True           # clip auxiliary rasters to the shape bbox
+  buffer_crs: "epsg:8857"    # equal-earth projection used for buffering
+  split_by: country_id       # one subunit per country code; subunits run in parallel
+  scenarios:
+    base:
+      techs:
+        pv_rooftop:
+          initial_area: settlement_area
+          continuous_layers:
+            settlement_share:
+              min: 0.01
+              max: 1
+              share: 0.8
+          binary_layers:
+            regions_maritime: 0
+            regions_land: 1
+            protected: 0
+            landcover_FARM: 1
+            landcover_FOREST: 1
+            landcover_URBAN: 1
+            landcover_OTHER: 1
+            landcover_NOT_SUITABLE: 0
+            landcover_WATER: 0
+        pv_open_field:
+          initial_area: pixel_area
+          continuous_layers:
+            slope_deg:
+              min: 0
+              max: 3
+            settlement_share:
+              min: 0
+              max: 0.01
+          binary_layers:
+            regions_maritime: 0
+            regions_land: 1
+            protected: 0
+            landcover_FARM: 0.1
+            landcover_FOREST: 0
+            landcover_URBAN: 0
+            landcover_OTHER: 0.2
+            landcover_NOT_SUITABLE: 0
+            landcover_WATER: 0
+        wind_onshore:
+          initial_area: pixel_area
+          continuous_layers:
+            slope_deg:
+              min: 0
+              max: 20
+            settlement_share:
+              min: 0
+              max: 0.01
+          binary_layers:
+            regions_maritime: 0
+            regions_land: 1
+            protected: 0
+            landcover_FARM: 0.2
+            landcover_FOREST: 0.05
+            landcover_URBAN: 0
+            landcover_OTHER: 0.3
+            landcover_NOT_SUITABLE: 0
+            landcover_WATER: 0
+        wind_offshore:
+          initial_area: pixel_area
+          continuous_layers:
+            bathymetry:
+              min: -50
+              max: 0
+              share: 0.8
+          binary_layers:
+            regions_land: 0
+            regions_maritime: 1
+            protected: 0
+          shapes_buffer:
+            # Kept at 0: the land buffer is pre-baked into the maritime
+            # geometry by build_shape_tiles.py using the per-country values
+            # in the `buffer_maritime` section at the top of this file. Only
+            # wind_offshore uses maritime shapes, so no other tech changes.
+            land: 0
+
+      # Per-subunit overrides keyed by country_id (`split_by`). The
+      # wind_offshore distances live under `buffer_maritime` at the top of
+      # this file; the overrides below stay at 0 so glom.merge does not
+      # reintroduce a runtime buffer for the pre-baked countries.
+      overrides:
+        PRT:
+          wind_offshore:
+            shapes_buffer:
+              land: 0
+        NLD:
+          wind_offshore:
+            shapes_buffer:
+              land: 0

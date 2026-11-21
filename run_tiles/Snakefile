@@ -1,0 +1,105 @@
+# Run module_area_potentials on every shape parquet in resources/inputs/shapes/.
+#
+# Each shape file must conform to the module's shape schema (shape_id,
+# country_id, shape_class in {"land", "maritime"}, geometry). The checkpoint
+# `breakup_shape` in the module splits each file by `split_by` (country_id)
+# and runs each subunit in parallel when snakemake is given multiple cores.
+# Dropping an additional parquet into the folder is enough: the workflow
+# discovers it at parse time and produces a separate report for it.
+#
+# Place one or more WDPA File Geodatabase archives (`*.gdb.zip`) into
+# `resources/inputs/wdpa/`. The workflow discovers them automatically,
+# unzips each, and merges all polygon layers into a single GeoPackage that
+# the module consumes. Dropping more regions (e.g. Africa, Asia) into the
+# same folder triggers a re-merge on the next run.
+configfile: workflow.source_path("./config.yaml")
+
+
+# Discover every tile parquet produced by build_shape_tiles.py.
+# One `area_potential_report.html` will be built per tile file.
+SHAPE_NAMES, = glob_wildcards("resources/inputs/tiles/{shape}.parquet")
+if not SHAPE_NAMES:
+    raise ValueError(
+        "No tile file found. Run build_shape_tiles.py to generate tiles under "
+        "`resources/inputs/tiles/`. Each tile must follow the module's shape "
+        "schema (shape_id, country_id, shape_class, geometry)."
+    )
+
+
+# Discover every WDPA regional archive the user dropped into the wdpa folder.
+# The glob runs at parse time; new zips are picked up on the next invocation.
+WDPA_REGIONS, = glob_wildcards("resources/inputs/wdpa/{region}.gdb.zip")
+if not WDPA_REGIONS:
+    raise ValueError(
+        "No WDPA archive found. Drop at least one `*.gdb.zip` into "
+        "`resources/inputs/wdpa/` (download per-region from "
+        "https://www.protectedplanet.net/)."
+    )
+
+
+rule unzip_wdpa_region:
+    """Unzip one WDPA regional archive next to the zip."""
+    input:
+        script=workflow.source_path("../workflow/scripts/unzip_like.py"),
+        zipfile="resources/inputs/wdpa/{region}.gdb.zip",
+    output:
+        directory("resources/inputs/wdpa/{region}.gdb"),
+    log:
+        "logs/unzip_wdpa_{region}.log",
+    conda:
+        "../workflow/envs/module.yaml"
+    message:
+        "Unzip WDPA region {wildcards.region}."
+    shell:
+        """
+        python {input.script:q} {input.zipfile:q} -t "resources/inputs/wdpa/" 2>{log:q}
+        """
+
+
+rule merge_wdpa:
+    """Merge polygon layers from every WDPA region into a single GeoPackage."""
+    input:
+        script=workflow.source_path("./merge_wdpa.py"),
+        gdbs=expand("resources/inputs/wdpa/{region}.gdb", region=WDPA_REGIONS),
+    output:
+        "resources/inputs/wdpa_merged.gpkg",
+    log:
+        "logs/merge_wdpa.log",
+    conda:
+        "../workflow/envs/module.yaml"
+    message:
+        f"Merge polygon layers from {len(WDPA_REGIONS)} WDPA region(s) into one GeoPackage."
+    shell:
+        """
+        python {input.script:q} {output:q} {input.gdbs:q} 2>{log:q}
+        """
+
+
+# Import module_area_potentials and rewire its file paths to this run directory.
+# See tests/integration/Snakefile for the reference example.
+module module_area_potentials:
+    pathvars:
+        shapes="resources/inputs/tiles/{shape}.parquet",
+        wdpa="resources/inputs/wdpa_merged.gpkg",
+        area_potential="results/outputs/{shape}/{scenario}/area_potential_{tech}.tif",
+        logs="resources/module/logs",
+        resources="resources/module/resources",
+        results="resources/module/results",
+    snakefile:
+        "../workflow/Snakefile"
+    config:
+        config["module_area_potentials"]
+
+
+use rule * from module_area_potentials as module_area_potentials_*
+
+
+rule all:
+    default_target: True
+    input:
+        expand(
+            "resources/module/results/{shape}/base/area_potential_report.html",
+            shape=SHAPE_NAMES,
+        ),
+    message:
+        f"Run the module for shapes: {', '.join(SHAPE_NAMES)}."
