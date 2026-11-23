@@ -48,6 +48,11 @@ def append_layer(gdb_path: Path, layer: str, output_path: Path, append: bool) ->
 
     ogr2ogr handles feature-by-feature streaming inside GDAL, so memory
     stays bounded even for very large regional WDPA layers.
+
+    We pick geometry only via ``-sql "SELECT FID FROM <layer>"`` (geometry is
+    an implicit OGR SQL column). ``-select ""`` would be the natural way to
+    drop all attributes, but GDAL >= 3.11 rejects an empty field list,
+    especially when combined with ``-update -append``.
     """
     cmd = [
         "ogr2ogr",
@@ -55,11 +60,11 @@ def append_layer(gdb_path: Path, layer: str, output_path: Path, append: bool) ->
         "-t_srs", TARGET_CRS,
         "-nln", OUTPUT_LAYER,
         "-nlt", "PROMOTE_TO_MULTI",
-        "-select", "",  # drop all non-geometry attributes
+        "-sql", f'SELECT FID FROM "{layer}"',
     ]
     if append:
         cmd += ["-update", "-append"]
-    cmd += [str(output_path), str(gdb_path), layer]
+    cmd += [str(output_path), str(gdb_path)]
     subprocess.run(cmd, check=True)
 
 
