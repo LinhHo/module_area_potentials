@@ -141,11 +141,26 @@ def _prebuffer_maritime(shapes, buffer_crs, default_m, overrides_m):
             .to_crs(shapes.crs)
             .iloc[0]
         )
+        # Re-projecting back to EPSG:4326 can introduce tiny self-intersections
+        # near the antimeridian; make_valid cleans them up.
+        land_buffer = shapely.make_valid(land_buffer)
         mask = (result["country_id"] == country_id) & (
             result["shape_class"] == "maritime"
         )
-        trimmed = result.loc[mask, "geometry"].difference(land_buffer)
-        trimmed = [_polygonal(shapely.make_valid(g)) for g in trimmed.values]
+        # Countries whose land or EEZ cross the 180th meridian (Fiji,
+        # Kiribati, Russia Far East, …) can still produce TopologyException in
+        # the difference. Catch it, skip the buffer for that country with a
+        # clear message, and keep the raw maritime polygon rather than killing
+        # the whole run.
+        try:
+            trimmed = result.loc[mask, "geometry"].difference(land_buffer)
+            trimmed = [_polygonal(shapely.make_valid(g)) for g in trimmed.values]
+        except shapely.errors.GEOSException as exc:
+            print(
+                f"  {country_id}: pre-buffer failed ({exc}); "
+                "keeping raw maritime polygon (likely antimeridian crossing)."
+            )
+            continue
         result.loc[mask, "geometry"] = trimmed
         result.loc[mask, "prebuffer_land_m"] = distance_m
         print(f"  {country_id}: buffered maritime by {distance_m:g} m.")
