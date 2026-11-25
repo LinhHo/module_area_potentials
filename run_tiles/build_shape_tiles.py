@@ -50,6 +50,12 @@ SHAPE_COLUMNS = ["shape_id", "country_id", "shape_class", "geometry"]
 # Optional columns passed through if present in the source; the module's
 # report.py expects parent_name.
 OPTIONAL_COLUMNS = ["parent_name"]
+
+# Countries dropped before tiling. GlobCover 2009 has no land-cover data
+# south of ~-65 deg S, so any tile containing ATA land fails resample.py
+# with NoDataInBounds. Solar / wind area potential on polar ice is also
+# not meaningful, so excluding Antarctica entirely is the honest fix.
+EXCLUDED_COUNTRIES = {"ATA"}
 METADATA_KEY = b"module_area_potentials"
 CONFIG_PATH = Path("config.yaml")  # relative to CWD (run_tiles/)
 
@@ -186,6 +192,13 @@ def build_tiles(source, output_dir, minx, miny, maxx, maxy, size, pre_buffer):
         raise ValueError(f"Source {source} missing column(s): {missing}.")
     if gdf.crs is None or gdf.crs.to_epsg() != 4326:
         raise ValueError(f"Source CRS must be EPSG:4326 (got {gdf.crs}).")
+    # Drop countries we cannot process (see EXCLUDED_COUNTRIES comment).
+    dropped = gdf["country_id"].isin(EXCLUDED_COUNTRIES)
+    if dropped.any():
+        print(
+            f"Excluding {dropped.sum()} rows for: {sorted(EXCLUDED_COUNTRIES)}"
+        )
+        gdf = gdf[~dropped]
     keep_cols = SHAPE_COLUMNS + [c for c in OPTIONAL_COLUMNS if c in gdf.columns]
     shapes = gdf[keep_cols].copy()
     for c in OPTIONAL_COLUMNS:

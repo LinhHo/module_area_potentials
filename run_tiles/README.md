@@ -31,8 +31,18 @@ pixi run python build_shape_tiles.py \
 #    (download per-region from https://www.protectedplanet.net/).
 
 # 3. Run the workflow.
-pixi run snakemake --use-conda --cores 8
+pixi run snakemake --use-conda --cores 8 --keep-going --retries 3
 ```
+
+`--keep-going` lets snakemake continue scheduling other tiles when one
+fails (a single bad tile no longer aborts the whole run). `--retries 3`
+auto-retries transient HTTP flakiness on the per-tile clips. Both are
+cheap belt-and-braces for larger runs.
+
+`build_shape_tiles.py` drops `ATA` (Antarctica) from the source before
+tiling, because GlobCover 2009 has no land-cover data below ~-65 deg S.
+Extend `EXCLUDED_COUNTRIES` in that script if you find other regions
+with the same limitation.
 
 ## Offshore buffer
 
@@ -67,12 +77,18 @@ WDPA regions and tiles are not reprocessed.
 
 ## Scaling up to a global run
 
-Two options when running large amount of tiles:
+`--keep-going --retries 3` are already in the standard command above and
+cover most transient issues. For large tile counts also consider:
 
-- `tiny_files: True` (default) streams slope and bathymetry from the
-  Zenodo COGs per tile. Occasional HTTPS failures start to hurt at
-  scale. Set `tiny_files: False` to download the global COGs once
-  (~8 GB) and clip them locally; HTTP flakiness goes away.
-- Add `--retries 3` to the snakemake command so any remaining transient
-  failure (a WDPA unzip, a landcover re-download) is retried
-  automatically.
+- Set `tiny_files: False` in `config.yaml`. The default (`True`) streams
+  slope and bathymetry from the Zenodo COGs per tile; occasional HTTPS
+  failures start to hurt at scale. `False` downloads the global COGs
+  once (~8 GB) and clips them locally, eliminating HTTP flakiness.
+- After the run, confirm every tile produced a final output:
+
+  ```shell
+  comm -23 <(ls resources/inputs/tiles/ | sed 's/\.parquet$//' | sort) \
+           <(ls results/outputs/ | sort)
+  ```
+
+  An empty result means everything made it through.
