@@ -69,6 +69,35 @@ mistaken for raw geoboundaries.
 To change the buffer policy, edit `buffer_maritime` and rerun
 `build_shape_tiles.py`.
 
+## Resample tiles to the 0.25 deg ERA5 grid
+
+`combine_tiles.py` resamples each tile's four technology TIFs onto a
+0.25 deg grid (EPSG:4326, the ERA5 projection) and bundles them into a
+single NetCDF with four variables. Downsampling uses sum-aggregation so
+pixel values stay in m^2 of suitable area per 0.25 deg cell.
+
+```shell
+# All tiles in results/outputs/:
+pixi run -e module python combine_tiles.py
+
+# Or specific tiles:
+pixi run -e module python combine_tiles.py tile_0_0_20_20 tile_20_0_40_20
+```
+
+The `-e module` is important: `rasterio`, `rioxarray` and `netcdf4` live in
+the `module` pixi environment, not the `default` one.
+
+Tiles that already have a NetCDF output are skipped on reruns, so you can
+safely invoke the command again after adding more tiles. Pass `--force` to
+regenerate everything.
+
+Output lands under `results/quarter_degree/` with filenames encoding the
+tile bbox, for example `area_potential_0_0_20_20.nc`. Each file contains
+`pv_rooftop`, `pv_open_field`, `wind_onshore`, `wind_offshore` as
+variables on `latitude` x `longitude` coordinates, plus concise metadata
+(`title`, `resolution_deg`, `projection`, `source`, `tile_bbox`,
+`generated_at`).
+
 ## Adding WDPA regions or tiles
 
 Drop new `*.gdb.zip` into `resources/inputs/wdpa/` or new tile parquets
