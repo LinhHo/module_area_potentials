@@ -63,8 +63,13 @@ CONFIG_PATH = Path("config.yaml")  # relative to CWD (run_tiles/)
 # points) inside a GeometryCollection when the source polygon's boundary only
 # grazes the tile edge (e.g. a tripoint). These collapse bounding boxes and
 # crash the module's clip_box, so we keep only polygonal parts and drop
-# anything whose area rounds to zero.
+# anything whose area rounds to zero or whose bbox is thinner than a few
+# GlobCover pixels (~0.0028 deg). The extent check catches strips with
+# non-trivial area but one near-zero dimension (e.g. a thin EEZ sliver at
+# a shared maritime boundary) that would otherwise trigger rioxarray's
+# OneDimensionalRaster error in resample.py.
 MIN_AREA_DEG2 = 1e-12
+MIN_EXTENT_DEG = 0.01  # ~3.6 GlobCover pixels, safely above the 1-pixel limit
 
 
 def _polygonal(geom):
@@ -80,8 +85,21 @@ def _polygonal(geom):
 
 
 def _drop_degenerate(gdf):
-    """Remove rows that are empty or whose area rounds to zero."""
-    return gdf[~gdf.geometry.is_empty & (gdf.geometry.area > MIN_AREA_DEG2)]
+    """Remove rows that are empty, zero-area, or too thin in one dimension.
+
+    The width/height check catches strips that have non-trivial area but
+    collapse to a single pixel when the module calls ``rio.clip_box``.
+    """
+    bounds = gdf.geometry.bounds
+    width = bounds["maxx"] - bounds["minx"]
+    height = bounds["maxy"] - bounds["miny"]
+    keep = (
+        ~gdf.geometry.is_empty
+        & (gdf.geometry.area > MIN_AREA_DEG2)
+        & (width > MIN_EXTENT_DEG)
+        & (height > MIN_EXTENT_DEG)
+    )
+    return gdf[keep]
 
 
 def _tile_bboxes(minx, miny, maxx, maxy, size):
